@@ -7,7 +7,7 @@ const courseRoute = Router()
 courseRoute.post("/courses",authMiddleware,async (req,res) =>{
     try{
         const {title, description} = req.body
-        const result = await pool.query("INSERT INTO courses(title,description,created_by,ispublished) VALUES ($1,$2,$3,$4) RETURNING *",[title,description,req.user.id,false])
+        const result = await pool.query("INSERT INTO courses(title,description,created_by,ispublished,cardcount) VALUES ($1,$2,$3,$4,$5) RETURNING *",[title,description,req.user.id,false,0])
         return res.status(201).json({
             result: result.rows[0]
         })
@@ -76,13 +76,18 @@ courseRoute.get("/courses/:id",authMiddleware,async (req,res) =>{
 courseRoute.delete("/courses/:id",authMiddleware,async (req,res) =>{
     try{
         const idNumber = Number(req.params.id)
+        if(!Number.isInteger(idNumber)){
+            return res.status(400).json({
+                error: "Not valid ID"
+            })
+        }
         const result = await pool.query("DELETE FROM courses WHERE id = $1 AND created_by = $2",[idNumber,req.user.id])
         if(result.rowCount === 0){
            return res.status(404).json({
             error: "Course not found"
         })
         }
-        return res.status(200).json({
+        return res.status(204).json({
             status: "Course deleted"
         })
 
@@ -94,5 +99,88 @@ courseRoute.delete("/courses/:id",authMiddleware,async (req,res) =>{
     }
     
 })
+// courseRoute.patch("/courses/:id",authMiddleware,async(res,req) =>{ TODO
+//     const idNumber = Number(req.params.id)
+//     if(!Number.isInteger(idNumber)){
+//             return res.status(400).json({
+//                 error: "Not valid ID"
+//             })
+//         }
+//     const {title,description,ispublished} = req.body ?? {}
+//     if(title !== undefined && typeof title !== "string" || description !== undefined && typeof description !== "string"|| ispublished !== undefined && typeof ispublished !== "boolean"){
+//         res.status(400).json({
+//             error: "Entered fields are invalid"
+//         })
+//     }
+//     const courseOwnership = await pool.query("SELECT * FROM courses WHERE id = $1 AND created_by = $2",[idNumber,req.user.id])
+//     if(courseOwnership.rows.length === 0){
+//         return res.status(400).json({
+//             error: "Course not found"
+//         })}
+//     })
+    courseRoute.post("/courses/:id/cards",authMiddleware,async (req,res) =>{
+        const client = await pool.connect()
+        try{
+            const idNumber = Number(req.params.id)
+            const {title,content} = req.body
+            if (!Number.isInteger(idNumber) || idNumber < -1) {
+            return res.status(400).json({
+                error: "Invalid ID"
+            })
+        }
+        if (
+            typeof title !== "string" ||
+            !title.trim() ||
+            typeof content !== "string"
+        ) {
+            return res.status(400).json({
+                error: "Invalid title or content"
+            })
+        }
+        await client.query("BEGIN")
+         const courseResult = await client.query(
+            `SELECT id FROM courses
+             WHERE id = $1 AND created_by = $2
+             FOR UPDATE`,
+            [idNumber, req.user.id]
+        )
 
+        if (courseResult.rows.length === 0) {
+            await client.query("ROLLBACK")
+
+            return res.status(404).json({
+                error: "Course not found"
+            })
+        }
+        const positionResult = await client.query(
+            `SELECT COALESCE(MAX(position), 0) + 1 AS next_position
+             FROM cards
+             WHERE course_id = $1`,
+            [idNumber]
+        )
+        const nextPosition = positionResult.rows[0].next_position
+        const result = await client.query(
+            `INSERT INTO cards (course_id, title, content, position)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [idNumber, title.trim(), content, nextPosition]
+        )
+
+        await client.query("COMMIT")
+
+        return res.status(201).json({
+            card: result.rows[0]
+        })} 
+        catch (error) {
+        await client.query("ROLLBACK")
+        console.log(error)
+
+        return res.status(500).json({
+            error: "Server Error"
+        })
+
+        } finally {
+            client.release()
+        }
+    })
 export default courseRoute
