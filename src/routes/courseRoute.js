@@ -51,4 +51,48 @@ courseRoute.get("/courses",authMiddleware,async (req,res) =>{
     }
 })
 
+courseRoute.get("/courses/:id",authMiddleware,async (req,res) =>{
+    try{
+        const idNumber = Number(req.params.id)
+        if(!Number.isInteger(idNumber) || idNumber < 0 ){
+            res.status(400).json({
+                error: "No such course id"
+            })
+        }
+        const result = await pool.query("SELECT * FROM courses WHERE id = $1 AND (ispublished = true or created_by = $2)",[idNumber,req.user.id])
+        if(result.rows.length === 0){
+            res.status(400).json({
+                error: "Course not found"
+            })
+        }
+        return res.status(200).json({
+                course: result.rows[0]
+            })
+    }
+    catch(error){
+
+    }
+})
+courseRoute.delete("/courses/:id",authMiddleware,async (req,res) =>{
+    try{
+        const idNumber = Number(req.params.id)
+        const result = await pool.query("DELETE FROM courses WHERE id = $1 AND created_by = $2",[idNumber,req.user.id])
+        if(result.rowCount === 0){
+           return res.status(404).json({
+            error: "Course not found"
+        })
+        }
+        return res.status(200).json({
+            status: "Course deleted"
+        })
+
+    }
+    catch(error){
+        res.status(400).json({
+            error: "Error"
+        })
+    }
+    
+})
+
 export default courseRoute
